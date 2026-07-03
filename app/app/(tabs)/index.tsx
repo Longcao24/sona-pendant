@@ -173,14 +173,17 @@ export default function DetectScreen() {
           }
           const n = candRef.current.label === L ? candRef.current.n + 1 : 1;
           candRef.current = { label: L, n };
-          return n >= 2 || prev.kind !== 'ok'
+          // Unanimous vote (all chunks agree) = already ~4.5s of consistent
+          // audio — switch immediately. Split votes still need 2 ticks.
+          const unanimous = json.top.prob >= 0.99;
+          return n >= 2 || unanimous || prev.kind !== 'ok'
             ? { kind: 'ok', label: L, eating: json.eating }
-            : prev; // one-off different label: keep showing the current one
+            : prev; // one-off split-vote label: keep showing the current one
         });
       } else {
         candRef.current = { label: '', n: 0 };
         offRef.current += 1;
-        if (offRef.current >= 3) {
+        if (offRef.current >= 2) {
           setDisplay(json.quiet ? { kind: 'quiet' } : { kind: 'unsure', label: json.top.label });
         }
       }
