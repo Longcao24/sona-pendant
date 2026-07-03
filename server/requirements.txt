@@ -1,0 +1,7 @@
+# Python 3.10–3.11 recommended (torch has no 3.14 wheels yet).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+numpy>=1.26
+torch>=2.2
+transformers>=4.40

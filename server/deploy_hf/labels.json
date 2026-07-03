@@ -1,0 +1,13 @@
+{
+  "_comment": "Real class mapping from app1.py FOOD_TO_ID (8 classes). eating=true for food intake; app1.py's rule: everything except Silence/Talking/Drinking is eating. NOTE: the 8-class model is 'nuna_production_model_with_weighted_loss_16_20' — the currently-loaded 6-class nuna_production_model does NOT match this; load the 8-class model via NUNA_MODEL_DIR.",
+  "classes": {
+    "0": { "name": "Silence",      "eating": false },
+    "1": { "name": "Apple",        "eating": true  },
+    "2": { "name": "Carrot",       "eating": true  },
+    "3": { "name": "Cookie",       "eating": true  },
+    "4": { "name": "Potato chips", "eating": true  },
+    "5": { "name": "Peanut",       "eating": true  },
+    "6": { "name": "Talking",      "eating": false },
+    "7": { "name": "Drinking",     "eating": false }
+  }
+}

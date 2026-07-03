@@ -1,0 +1,34 @@
+# --- models: too big for GitHub (100 MB file limit). Get them from HF Space
+# Hoanglong2003/nuna-food-intake or keep local copies.
+nuna_production_model/
+nuna_production_model.zip
+nuna_production_model_with_weighted_loss_16_20/
+server/deploy_hf/model/
+
+# python
+server/.venv/
+__pycache__/
+*.pyc
+
+# node / expo
+app/node_modules/
+app/.expo/
+app/dist/
+
+# android build output
+app/android/build/
+app/android/app/build/
+app/android/.gradle/
+app/android/local.properties
+
+# artifacts
+*.apk
+*.hex
+*.uf2
+*.zip
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+.claude/
