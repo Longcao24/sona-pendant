@@ -111,6 +111,10 @@ STRONG_PROB = float(os.environ.get("NUNA_STRONG", 0.85))
 # app1.py's eating rule: everything EXCEPT these counts as food intake.
 NON_EATING = {"Silence", "Talking", "Drinking"}
 
+# Classes force-zeroed after softmax (model over-predicts them on this mic).
+# Comma-separated env override, e.g. NUNA_DISABLE="Peanut,Cookie".
+DISABLED = {s.strip() for s in os.environ.get("NUNA_DISABLE", "Peanut").split(",") if s.strip()}
+
 
 def _merge(label: str) -> str:
     # app1.py collapses Carrot into Apple.
@@ -152,6 +156,12 @@ def classify(wave_f32: np.ndarray) -> dict:
     )
     logits = _model(inputs.input_values.to(DEVICE)).logits      # [n_chunks, C]
     chunk_probs = torch.softmax(logits, dim=1).float().cpu().numpy()
+    # Zero disabled classes and renormalize so they can never win a vote.
+    for i, name in LABELS.items():
+        if name in DISABLED:
+            chunk_probs[:, i] = 0.0
+    row_sums = chunk_probs.sum(axis=1, keepdims=True)
+    chunk_probs = chunk_probs / np.clip(row_sums, 1e-9, None)
     mean_probs = chunk_probs.mean(axis=0)                       # avg distribution
 
     # Per-chunk winner -> merged label -> majority vote (app1.py logic), with an
