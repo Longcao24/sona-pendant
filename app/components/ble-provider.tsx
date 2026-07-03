@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
+import { File, Paths } from 'expo-file-system';
 
 // Lazy import — BleManager throws if the native module is absent (Expo Go).
 let BleManagerClass: typeof import('react-native-ble-plx').BleManager | null = null;
@@ -39,7 +40,12 @@ type BleCtx = {
   connectTo: (role: Role, id: string) => Promise<void>;
   disconnect: (role: Role) => Promise<void>;
   battery: number | null;                            // pendant battery %, null = unknown
+  bondedId: string | null;                           // remembered pendant (auto-connect target)
+  forget: () => void;                                // unbind: stop auto-connecting to it
 };
+
+// Remembered-pendant persistence (same pattern as server-url-provider).
+const BOND_FILE = () => new File(Paths.document, 'pendant.json');
 
 const Ctx = createContext<BleCtx | null>(null);
 export const useBle = () => {
@@ -65,6 +71,31 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
 
   const bleRef   = useRef<InstanceType<NonNullable<typeof BleManagerClass>> | null>(null);
   const foundRef = useRef<Map<string, any>>(new Map());   // id -> peripheral handle
+
+  // Remembered pendant: saved on first successful connect, auto-connected on
+  // sight afterwards. forget() unbinds (Settings > Forget This Pendant).
+  const [bondedId, setBondedId] = useState<string | null>(null);
+  const bondedRef = useRef<string | null>(null);
+  useEffect(() => { bondedRef.current = bondedId; }, [bondedId]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const f = BOND_FILE();
+        if (f.exists) {
+          const id = JSON.parse(await f.text())?.id;
+          if (typeof id === 'string' && id) setBondedId(id);
+        }
+      } catch {}
+    })();
+  }, []);
+  const saveBond = useCallback((id: string | null) => {
+    setBondedId(id);
+    try {
+      const f = BOND_FILE();
+      if (id) { f.create({ overwrite: true }); f.write(JSON.stringify({ id })); }
+      else if (f.exists) f.delete();
+    } catch {}
+  }, []);
 
   useEffect(() => {
     try {
@@ -106,10 +137,18 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
         .map((d: any) => ({ id: d.id, name: d.name ?? d.localName ?? DEVICE_NAME, rssi: d.rssi ?? -100 }))
         .sort((a, b) => b.rssi - a.rssi);
       setDevices(list);
+      // Auto-connect: it's the remembered pendant and we're not busy.
+      if (dev.id === bondedRef.current && !autoBusyRef.current) {
+        autoBusyRef.current = true;
+        connectToRef.current?.('audio', dev.id)
+          .finally(() => setTimeout(() => { autoBusyRef.current = false; }, 5000)); // backoff on failure
+      }
     });
 
     setTimeout(() => ble.stopDeviceScan(), 8000);
   }, []);
+  const autoBusyRef = useRef(false);
+  const connectToRef = useRef<((role: Role, id: string) => Promise<void>) | null>(null);
 
   const connectTo = useCallback(async (role: Role, id: string) => {
     const ble = bleRef.current;
@@ -130,11 +169,13 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
       setDev(role, d);
       setState(role, 'connected');
       setMsg(role, `Connected · ${d.name ?? dev.name ?? dev.localName ?? DEVICE_NAME}`);
+      saveBond(id);                 // remember: auto-connect to this pendant from now on
     } catch (e: any) {
       setState(role, 'idle');
       setMsg(role, e.message ?? 'Connection failed');
     }
-  }, []);
+  }, [saveBond]);
+  useEffect(() => { connectToRef.current = connectTo; }, [connectTo]);
 
   const disconnect = useCallback(async (role: Role) => {
     const d = devAudio;
@@ -143,6 +184,13 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
     setState(role, 'idle');
     setMsg(role, 'Tap Scan, then pick the necklace');
   }, [devAudio]);
+
+  // Unbind: forget the remembered pendant AND drop the current connection —
+  // otherwise auto-scan re-pairs it seconds later.
+  const forget = useCallback(() => {
+    saveBond(null);
+    disconnect('audio');
+  }, [saveBond, disconnect]);
 
   const deviceFor = useCallback((_r: Role) => devAudio, [devAudio]);
   const stateOf   = useCallback((_r: Role) => stAudio, [stAudio]);
@@ -181,7 +229,7 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
   }, [noBle, stAudio, scan]);
 
   return (
-    <Ctx.Provider value={{ noBle, devices, scan, deviceFor, stateOf, statusOf, connectTo, disconnect, battery }}>
+    <Ctx.Provider value={{ noBle, devices, scan, deviceFor, stateOf, statusOf, connectTo, disconnect, battery, bondedId, forget }}>
       {children}
     </Ctx.Provider>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, View, Text, TextInput, Pressable, ActivityIndicator, Keyboard, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, TextInput, Pressable, ActivityIndicator, Keyboard, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -12,7 +12,7 @@ type Test = { state: 'idle' | 'testing' | 'ok' | 'fail'; msg: string };
 
 export default function SettingsScreen() {
   const { url, setUrl } = useServerUrl();
-  const { stateOf, disconnect, battery } = useBle();
+  const { stateOf, disconnect, battery, bondedId, forget } = useBle();
   const router = useRouter();
   const [draft, setDraft] = useState(url);
   const [saved, setSaved] = useState(false);
@@ -127,7 +127,26 @@ export default function SettingsScreen() {
               </Pressable>
             </>
           )}
+          {bondedId && (
+            <>
+              <View style={s.sep} />
+              <Pressable
+                style={({ pressed }) => [s.row, pressed && s.pressed]}
+                onPress={() =>
+                  Alert.alert('Forget this pendant?', 'The app will stop connecting to it automatically.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Forget', style: 'destructive', onPress: forget },
+                  ])
+                }
+              >
+                <Text style={[s.rowLabel, { color: A.red }]}>Forget This Pendant</Text>
+              </Pressable>
+            </>
+          )}
         </View>
+        {bondedId ? (
+          <Text style={s.footer}>Auto-connects to your pendant when it's nearby.</Text>
+        ) : null}
 
         {/* ── Debug ── */}
         <Text style={s.section}>Debug</Text>
