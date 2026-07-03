@@ -6,6 +6,9 @@
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:targetApi="31"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
@@ -35,5 +38,11 @@
         <data android:scheme="sona"/>
       </intent-filter>
     </activity>
+    <!-- Android 14+ requires an explicit foregroundServiceType; the library's
+         manifest doesn't set one, so we override it here (BLE = connectedDevice). -->
+    <service
+      android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask"
+      android:foregroundServiceType="connectedDevice"
+      tools:node="merge" />
   </application>
 </manifest>

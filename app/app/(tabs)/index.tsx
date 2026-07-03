@@ -7,6 +7,7 @@ import { useBle, AUDIO_SVC, AUDIO_CHR, CTRL_CHR } from '@/components/ble-provide
 import { DevicePicker } from '@/components/device-picker';
 import { useServerUrl } from '@/components/server-url-provider';
 import { useEvents } from '@/components/events-provider';
+import { askNotifPermission, startDetectionService, stopDetectionService, notifySessionSummary } from '@/components/detection-service';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { A, LABEL_ICON } from '@/constants/apple';
@@ -92,7 +93,9 @@ export default function DetectScreen() {
   const device = deviceFor('audio');
   const connected = stateOf('audio') === 'connected';
   const { url } = useServerUrl();
-  const { report, flush } = useEvents();
+  const { report, flush, events } = useEvents();
+  const eventsRef = useRef(events);
+  useEffect(() => { eventsRef.current = events; }, [events]);
 
   const [streaming, setStreaming] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -195,15 +198,23 @@ export default function DetectScreen() {
     }
   }, []);
 
+  // User INTENT to stream — survives BLE drops so we can auto-resume when the
+  // pendant reconnects (auto-connect in ble-provider brings it back).
+  const wantStreamRef = useRef(false);
+
   const start = useCallback(() => {
     if (!device || subscRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    wantStreamRef.current = true;
     bufRef.current = new Uint8Array(0);
     setResult(null);
     setStatus('');
     setDisplay({ kind: 'none' });
     candRef.current = { label: '', n: 0 };
     offRef.current = 0;
+
+    // Foreground service keeps BLE + timers alive with the screen off.
+    askNotifPermission().then(() => startDetectionService());
 
     subscRef.current = device.monitorCharacteristicForService(
       AUDIO_SVC, AUDIO_CHR,
@@ -222,29 +233,47 @@ export default function DetectScreen() {
     setStreaming(true);
   }, [device, classify]);
 
-  const stop = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  // teardown = pause the pipeline (BLE drop); full stop = user pressed Stop.
+  const teardown = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     subscRef.current?.remove();
     subscRef.current = null;
+    setStreaming(false);
+  }, []);
+
+  const stop = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    wantStreamRef.current = false;
+    teardown();
     if (device) {
       device.writeCharacteristicWithResponseForService(
         AUDIO_SVC, CTRL_CHR, btoa(String.fromCharCode(0x00)),
       ).catch(() => {});
     }
     flushRef.current(); // commit the open event now — don't lose it on Stop
-    setStreaming(false);
-  }, [device]);
+    stopDetectionService();
+    // Session summary notification with today's totals.
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const today = eventsRef.current.filter((e) => e.end >= t0.getTime());
+    const eatMs = today.reduce((s, e) => s + (e.eating ? e.end - e.start : 0), 0);
+    notifySessionSummary(eatMs, today.length);
+  }, [device, teardown]);
 
-  // Auto-stop if the device drops; clean up on unmount.
+  // BLE drop while user still wants to stream -> pause; reconnect -> resume.
   useEffect(() => {
-    if (!connected && subscRef.current) stop();
+    if (!connected && subscRef.current) {
+      teardown();
+      if (wantStreamRef.current) setStatus('Pendant disconnected — waiting to reconnect…');
+    }
+    if (connected && wantStreamRef.current && !subscRef.current && device) {
+      start();   // auto-resume the stream on the fresh connection
+    }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       subscRef.current?.remove();
       subscRef.current = null;
     };
-  }, [connected, stop]);
+  }, [connected, device, teardown, start]);
 
   // Render from the STABILIZED display, not the raw per-tick result.
   const heroLabel =

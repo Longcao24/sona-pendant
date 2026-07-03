@@ -12,7 +12,7 @@ type Test = { state: 'idle' | 'testing' | 'ok' | 'fail'; msg: string };
 
 export default function SettingsScreen() {
   const { url, setUrl } = useServerUrl();
-  const { stateOf, disconnect, battery, bondedId, forget } = useBle();
+  const { stateOf, disconnect, battery, bondedId, forget, deviceFor } = useBle();
   const router = useRouter();
   const [draft, setDraft] = useState(url);
   const [saved, setSaved] = useState(false);
@@ -121,6 +121,20 @@ export default function SettingsScreen() {
           )}
           {connected && (
             <>
+              <View style={s.sep} />
+              <Pressable
+                style={({ pressed }) => [s.row, pressed && s.pressed]}
+                onPress={() => {
+                  // control byte 0x02 -> pendant flashes its LEDs for ~5s
+                  deviceFor('audio')?.writeCharacteristicWithResponseForService(
+                    '19b10000-e8f2-537e-4f6c-d104768a1214',
+                    '19b10002-e8f2-537e-4f6c-d104768a1214',
+                    btoa(String.fromCharCode(0x02)),
+                  ).catch(() => {});
+                }}
+              >
+                <Text style={[s.rowLabel, { color: A.blue }]}>Flash Pendant LED</Text>
+              </Pressable>
               <View style={s.sep} />
               <Pressable style={({ pressed }) => [s.row, pressed && s.pressed]} onPress={() => disconnect('audio')}>
                 <Text style={[s.rowLabel, { color: A.red }]}>Disconnect</Text>

@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { StyleSheet, View, Text, SectionList, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -162,14 +164,35 @@ export default function EventsScreen() {
       { text: 'Clear', style: 'destructive', onPress: clear },
     ]);
 
+  // Export the full log as CSV (share sheet -> save/mail/drive).
+  const exportCsv = useCallback(async () => {
+    try {
+      const rows = ['start_iso,end_iso,label,eating,duration_s'];
+      for (const e of events) {
+        rows.push(`${new Date(e.start).toISOString()},${new Date(e.end).toISOString()},"${e.label}",${e.eating},${Math.round((e.end - e.start) / 1000)}`);
+      }
+      const f = new File(Paths.cache, `sona_events_${new Date().toISOString().slice(0, 10)}.csv`);
+      f.create({ overwrite: true });
+      f.write(rows.join('\n'));
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(f.uri, { mimeType: 'text/csv' });
+    } catch (e: any) {
+      Alert.alert('Export failed', e.message ?? 'unknown error');
+    }
+  }, [events]);
+
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <View style={s.header}>
         <Text style={s.title}>Events</Text>
         {events.length > 0 && (
-          <Pressable onPress={confirmClear} hitSlop={8}>
-            <Text style={s.clear}>Clear</Text>
-          </Pressable>
+          <View style={s.headerBtns}>
+            <Pressable onPress={exportCsv} hitSlop={8}>
+              <MaterialCommunityIcons name="export-variant" size={22} color={A.blue} />
+            </Pressable>
+            <Pressable onPress={confirmClear} hitSlop={8}>
+              <Text style={s.clear}>Clear</Text>
+            </Pressable>
+          </View>
         )}
       </View>
 
@@ -240,6 +263,7 @@ const s = StyleSheet.create({
   header:    { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
                paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
   title:     { fontSize: 34, fontWeight: '700', color: A.label, letterSpacing: 0.3 },
+  headerBtns:{ flexDirection: 'row', alignItems: 'center', gap: 18 },
   clear:     { fontSize: 17, color: A.blue },
   listContent: { paddingHorizontal: 16, paddingBottom: 32 },
   // summary cards + charts

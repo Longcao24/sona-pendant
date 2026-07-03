@@ -12,6 +12,7 @@
  *   Service   19B10000-E8F2-537E-4F6C-D104768A1214
  *   Audio     19B10001  NOTIFY  244 bytes = 122 int16 samples (16 kHz mono)
  *   Control   19B10002  WRITE   1 byte  0x01=start stream  0x00=stop
+ *                                       0x02=find-me (LED flash ~5 s)
  *   Adv name  "Nuna-Necklace"  (also advertises the service UUID)
  *
  * Throughput notes (16 kHz*16bit = 256 kbps, tight for BLE):
@@ -101,6 +102,7 @@ volatile bool recording = false;   // phone pressed Start (master switch)
 static bool napping = false;       // quiet too long -> radio+mic resting
 static uint32_t lastLoudMs = 0;
 static uint32_t lastNapCheckMs = 0;
+static volatile uint32_t findMeUntil = 0;   // millis deadline for find-me LED flash
 
 // ── PDM data callback (called from PDM IRQ) ──────────────────────────────────
 void onPDMdata() {
@@ -146,6 +148,8 @@ void onCtrlWrite(uint16_t, BLECharacteristic*, uint8_t* data, uint16_t len) {
     recording = false;
     napping = false;
     PDM.end();
+  } else if (data[0] == 0x02) {
+    findMeUntil = millis() + 5000;   // "find me": flash LEDs for 5 s
   }
 }
 
@@ -232,7 +236,12 @@ void loop() {
   // Status LED (duty-cycled — solid LEDs burn ~1 mA each)
   static uint32_t lastBlink = 0;
   static bool blinkState = false;
-  if (recording && !napping) {
+  if (now < findMeUntil) {
+    // find-me: loud alternating flash overrides everything
+    bool ph = (now % 250) < 125;
+    ph ? redOn() : redOff();
+    ph ? blueOff() : blueOn();
+  } else if (recording && !napping) {
     blueOff();
     // streaming: red at 10% duty (30 ms on / 270 ms off) instead of solid
     redOn(); if ((now % 300) > 30) redOff();
