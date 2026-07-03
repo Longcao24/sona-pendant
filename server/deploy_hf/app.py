@@ -100,9 +100,13 @@ STEP_SAMPLES = int(STEP_SEC * TARGET_SR)
 # softmax max below this -> chunk votes "Unknown" (light open-set guard on top
 # of app1.py's plain argmax; the 8-class model covers Talking/Drinking, so this
 # only rejects genuinely ambiguous chunks).
-MIN_RMS = float(os.environ.get("NUNA_MIN_RMS", 0.0025))
+MIN_RMS = float(os.environ.get("NUNA_MIN_RMS", 0.0012))
 CONF_THRESHOLD = float(os.environ.get("NUNA_CONF", 0.5))
 PROB_THRESHOLD = float(os.environ.get("NUNA_PROB", 0.5))
+# A chunk this confident overrides the energy gate — real speech/chewing through
+# the pendant is often low-RMS, and silencing it made the UI disagree with the
+# probability bars (bars said Talking, circle said Silence).
+STRONG_PROB = float(os.environ.get("NUNA_STRONG", 0.85))
 
 # app1.py's eating rule: everything EXCEPT these counts as food intake.
 NON_EATING = {"Silence", "Talking", "Drinking"}
@@ -155,8 +159,6 @@ def classify(wave_f32: np.ndarray) -> dict:
     # "Unknown" — the 6-class model can't say Talking/Drinking, so uncertain
     # chunks must not masquerade as food.
     def _chunk_vote(p: np.ndarray, rms_c: float) -> str:
-        if rms_c < MIN_RMS:
-            return "Silence"   # energy gate: don't trust amplified near-silence
         # Merge first (Carrot prob folds into Apple), then threshold — a chunk
         # split 0.5 Apple / 0.4 Carrot is really 0.9 "Apple", not two weak votes.
         acc: Dict[str, float] = {}
@@ -164,13 +166,18 @@ def classify(wave_f32: np.ndarray) -> dict:
             m = _merge(LABELS[i])
             acc[m] = acc.get(m, 0.0) + float(pi)
         lab, prob = max(acc.items(), key=lambda kv: kv[1])
+        # Energy gate: near-silent chunks vote Silence — UNLESS the model is
+        # very sure it heard something (quiet talking/chewing is real).
+        if rms_c < MIN_RMS and not (lab != "Silence" and prob >= STRONG_PROB):
+            return "Silence"
         return lab if prob >= PROB_THRESHOLD else "Unknown"
 
     votes = Counter(_chunk_vote(p, r) for p, r in zip(chunk_probs, chunk_rms))
-    if quiet:
-        maj_label = "Silence"
-    else:
-        maj_label = votes.most_common(1)[0][0]
+    # Majority vote decides — the votes already encode the energy gate, so the
+    # whole-clip quiet flag no longer overrides them (it made the hero circle
+    # contradict the probability bars).
+    maj_label = votes.most_common(1)[0][0]
+    quiet = quiet and maj_label == "Silence"
     n = len(chunks)
     vote_frac = votes.get(maj_label, 0) / n if n else 0.0
     confident = (not quiet) and (maj_label != "Unknown") and (vote_frac >= CONF_THRESHOLD)
