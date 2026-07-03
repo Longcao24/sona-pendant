@@ -85,6 +85,15 @@ LABELS: Dict[int, str] = {i: _names.get(i, _cfg_id2label.get(i, f"LABEL_{i}")) f
 EATING: Dict[int, bool] = {i: _eating.get(i, False) for i in range(_model.config.num_labels)}
 print(f"[nuna] labels: {LABELS}")
 
+# Warmup: the first MPS/CUDA forward pays kernel-compile cost (~1-2s). Eat it
+# at boot so the app's first classify isn't the slow one.
+with torch.inference_mode():
+    _wu = _extractor([np.zeros(int(3 * TARGET_SR), dtype=np.float32)],
+                     sampling_rate=TARGET_SR, return_tensors="pt",
+                     max_length=int(3 * TARGET_SR), truncation=True, padding="max_length")
+    _model(_wu.input_values.to(DEVICE))
+print("[nuna] warmup done")
+
 
 # ── Inference (mirrors app1.py) ──────────────────────────────────────────────
 # Pipeline copied from the reference app1.py so behavior matches training:
@@ -269,9 +278,11 @@ async def classify_b64(payload: dict):
     if not b64:
         return JSONResponse({"error": "missing pcm_b64"}, status_code=400)
     try:
-        raw = base64.b64decode(b64)
+        raw = base64.b64decode(b64, validate=True)   # validate: junk chars -> error, not silently empty
     except Exception as e:
         return JSONResponse({"error": f"bad base64: {e}"}, status_code=400)
+    if len(raw) < 2:
+        return JSONResponse({"error": "empty audio"}, status_code=400)
     return classify(decode_pcm16(raw))
 
 
