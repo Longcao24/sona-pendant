@@ -1,5 +1,6 @@
-# --- models: too big for GitHub (100 MB file limit). Get them from HF Space
-# Hoanglong2003/nuna-food-intake or keep local copies.
+# --- models: too big for git (100 MB file limit). Download from the release:
+# https://github.com/Longcao24/sona-pendant/releases/download/v1.0.0/nuna_production_model_with_weighted_loss_16_20.zip
+# unzip at repo root, then `./server/demo.sh` works.
 nuna_production_model/
 nuna_production_model.zip
 nuna_production_model_with_weighted_loss_16_20/
