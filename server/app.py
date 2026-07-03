@@ -113,7 +113,7 @@ NON_EATING = {"Silence", "Talking", "Drinking"}
 
 # Classes force-zeroed after softmax (model over-predicts them on this mic).
 # Comma-separated env override, e.g. NUNA_DISABLE="Peanut,Cookie".
-DISABLED = {s.strip() for s in os.environ.get("NUNA_DISABLE", "Peanut").split(",") if s.strip()}
+DISABLED = {s.strip() for s in os.environ.get("NUNA_DISABLE", "Peanut,Cookie").split(",") if s.strip()}
 
 
 def _merge(label: str) -> str:
