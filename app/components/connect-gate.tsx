@@ -81,7 +81,7 @@ export function ConnectGate({ children }: { children: React.ReactNode }) {
                 <Text style={s.name}>{BRAND} Pendant</Text>
                 <Text style={s.sn}>SN: {cand.id.replace(/[^A-Za-z0-9]/g, '').slice(-16).toUpperCase() || cand.id}</Text>
                 <Pressable
-                  style={[s.connect, connecting && s.connectBusy]}
+                  style={({ pressed }) => [s.connect, connecting && s.connectBusy, pressed && { opacity: 0.8 }]}
                   disabled={connecting}
                   onPress={() => connectTo('audio', cand.id)}
                 >
@@ -95,7 +95,7 @@ export function ConnectGate({ children }: { children: React.ReactNode }) {
                   <Text style={s.scanText}>Looking for your pendant…</Text>
                 </View>
                 <Text style={s.hint}>Power on the pendant (blue LED blinking). Bluetooth + Location must be on.</Text>
-                <Pressable style={s.rescan} onPress={() => scan()}>
+                <Pressable style={({ pressed }) => [s.rescan, pressed && { opacity: 0.6 }]} onPress={() => scan()}>
                   <Text style={s.rescanText}>Scan again</Text>
                 </Pressable>
               </>

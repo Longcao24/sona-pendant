@@ -1,6 +1,7 @@
 """Audio decoding helpers — no torch/transformers, so unit-testable standalone."""
 import io
 import wave
+from functools import lru_cache
 
 import numpy as np
 from scipy.signal import butter, lfilter
@@ -8,12 +9,17 @@ from scipy.signal import butter, lfilter
 TARGET_SR = 16000
 
 
+@lru_cache(maxsize=4)
+def _bandpass_coeffs(sr: int):
+    nyq = 0.5 * sr
+    return butter(5, [100.0 / nyq, 7500.0 / nyq], btype="band")
+
+
 def apply_light_conditioning(y: np.ndarray, sr: int = TARGET_SR) -> np.ndarray:
     """EXACT copy of the training/inference conditioning in app1.py — must match
     or the model sees a different distribution. Bandpass 100–7500 Hz, then
     z-score, then peak-normalize to [-1, 1]."""
-    nyq = 0.5 * sr
-    b, a = butter(5, [100.0 / nyq, 7500.0 / nyq], btype="band")
+    b, a = _bandpass_coeffs(sr)
     y_filtered = lfilter(b, a, y)
     std = np.std(y_filtered)
     y_norm = (y_filtered - np.mean(y_filtered)) / std if std > 0 else y_filtered

@@ -293,13 +293,20 @@ export default function DetectScreen() {
                   color={display.kind === 'ok' ? (eatingNow ? A.green : A.label) : A.secondary}
                 />
                 <Text style={[s.heroLabel, { color: display.kind === 'ok' ? A.label : A.secondary }]}>{heroLabel}</Text>
-                <Text style={s.heroSub}>
-                  {display.kind === 'none'
-                    ? (streaming ? 'listening…' : 'tap Start')
-                    : display.kind === 'quiet' ? 'no sound'
-                    : display.kind === 'unsure' ? 'low confidence'
-                    : eatingNow ? 'Eating' : 'Not eating'}
-                </Text>
+                {display.kind === 'ok' ? (
+                  <View style={[s.capsule, { backgroundColor: eatingNow ? '#E8F8EC' : A.fillBtn }]}>
+                    <Text style={[s.capsuleText, { color: eatingNow ? A.green : A.secondary }]}>
+                      {eatingNow ? 'Eating' : 'Not eating'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={s.heroSub}>
+                    {display.kind === 'none'
+                      ? (streaming ? 'listening…' : 'tap Start')
+                      : display.kind === 'quiet' ? 'no sound'
+                      : 'low confidence'}
+                  </Text>
+                )}
               </Animated.View>
             </View>
           </View>
@@ -315,7 +322,7 @@ export default function DetectScreen() {
 
           {/* Start / Stop */}
           <Pressable
-            style={[s.btn, streaming && s.btnStop]}
+            style={({ pressed }) => [s.btn, streaming && s.btnStop, pressed && { opacity: 0.75, transform: [{ scale: 0.985 }] }]}
             onPress={streaming ? stop : start}
           >
             <Text style={[s.btnText, streaming && { color: A.red }]}>{streaming ? 'Stop' : 'Start'}</Text>
@@ -336,8 +343,10 @@ const s = StyleSheet.create({
   heroRing:  { position: 'absolute', width: CIRCLE + 24, height: CIRCLE + 24, borderRadius: (CIRCLE + 24) / 2, borderWidth: 10 },
   hero:      { width: CIRCLE, height: CIRCLE, borderRadius: CIRCLE / 2, borderWidth: 2, backgroundColor: A.card,
                alignItems: 'center', justifyContent: 'center' },
-  heroLabel: { fontSize: 26, fontWeight: '700', marginTop: 8, textTransform: 'capitalize' },
-  heroSub:   { fontSize: 14, color: A.secondary, marginTop: 4, fontWeight: '500' },
+  heroLabel: { fontSize: 26, fontWeight: '700', marginTop: 8, textTransform: 'capitalize', letterSpacing: 0.2 },
+  heroSub:   { fontSize: 14, color: A.secondary, marginTop: 6, fontWeight: '500' },
+  capsule:   { marginTop: 8, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12 },
+  capsuleText: { fontSize: 13, fontWeight: '600' },
   probCard:  { width: '100%', backgroundColor: A.card, borderRadius: 16, padding: 16, marginTop: 20, gap: 10 },
   probRow:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
   probLabel: { width: 86, fontSize: 13, color: A.label },

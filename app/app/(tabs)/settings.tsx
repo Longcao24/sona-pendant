@@ -80,16 +80,16 @@ export default function SettingsScreen() {
           />
           <View style={s.sep} />
           <View style={s.btnRow}>
-            <Pressable style={[s.cardBtn]} onPress={testConn} hitSlop={6}>
+            <Pressable style={({ pressed }) => [s.cardBtn, pressed && s.pressed]} onPress={testConn} hitSlop={6}>
               <Text style={s.cardBtnText}>Test</Text>
             </Pressable>
             <View style={s.vSep} />
-            <Pressable style={[s.cardBtn]} onPress={save} hitSlop={6}>
+            <Pressable style={({ pressed }) => [s.cardBtn, pressed && s.pressed]} onPress={save} hitSlop={6}>
               <Text style={[s.cardBtnText, saved && { color: A.green }]}>{saved ? 'Saved ✓' : 'Save'}</Text>
             </Pressable>
           </View>
           <View style={s.sep} />
-          <Pressable style={s.row} onPress={useCloud} disabled={onCloud}>
+          <Pressable style={({ pressed }) => [s.row, pressed && s.pressed]} onPress={useCloud} disabled={onCloud}>
             <Text style={[s.rowLabel, { color: onCloud ? A.tertiary : A.blue }]}>
               {onCloud ? 'Using Cloud Server ✓' : 'Use Cloud Server (default)'}
             </Text>
@@ -113,7 +113,7 @@ export default function SettingsScreen() {
           {connected && (
             <>
               <View style={s.sep} />
-              <Pressable style={s.row} onPress={() => disconnect('audio')}>
+              <Pressable style={({ pressed }) => [s.row, pressed && s.pressed]} onPress={() => disconnect('audio')}>
                 <Text style={[s.rowLabel, { color: A.red }]}>Disconnect</Text>
               </Pressable>
             </>
@@ -124,7 +124,7 @@ export default function SettingsScreen() {
         <Text style={s.section}>Debug</Text>
         <View style={s.card}>
           {/* cast: expo-router typed routes regenerate on next `expo start`; /record exists */}
-          <Pressable style={s.row} onPress={() => router.push('/record' as any)}>
+          <Pressable style={({ pressed }) => [s.row, pressed && s.pressed]} onPress={() => router.push('/record' as any)}>
             <Text style={s.rowLabel}>Record raw audio</Text>
             <Text style={s.chevron}>›</Text>
           </Pressable>
@@ -144,6 +144,7 @@ const s = StyleSheet.create({
   section: { fontSize: 13, color: A.secondary, textTransform: 'uppercase', letterSpacing: 0.4,
              marginTop: 24, marginBottom: 8, marginLeft: 16 },
   card:    { backgroundColor: A.card, borderRadius: 12, overflow: 'hidden' },
+  pressed: { backgroundColor: '#F0F0F2' },
   input:   { paddingHorizontal: 16, paddingVertical: 13, color: A.label, fontSize: 16 },
   sep:     { height: StyleSheet.hairlineWidth, backgroundColor: A.separator, marginLeft: 16 },
   btnRow:  { flexDirection: 'row' },
