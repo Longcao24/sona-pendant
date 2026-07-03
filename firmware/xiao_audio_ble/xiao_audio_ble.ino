@@ -67,6 +67,35 @@ static inline void blueOff() { NRF_P0->OUTSET = (1UL << LED_BLUE); }
 BLEService        audioSvc("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic audioChr("19B10001-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic ctrlChr ("19B10002-E8F2-537E-4F6C-D104768A1214");
+BLEBas            batSvc;   // standard Battery Service 0x180F / 0x2A19 (%)
+
+// ── Battery (XIAO nRF52840: VBAT on P0.31 behind 1M/510k divider, enabled by
+//    pulling P0.14 low; LiPo 3.3 V empty .. 4.2 V full) ────────────────────────
+#ifndef PIN_VBAT
+#define PIN_VBAT        32   // P0.31 / AIN7
+#endif
+#ifndef VBAT_ENABLE
+#define VBAT_ENABLE     14   // P0.14, LOW = divider connected
+#endif
+
+static uint8_t readBatteryPct() {
+  digitalWrite(VBAT_ENABLE, LOW);
+  delayMicroseconds(200);                    // divider settle
+  analogReference(AR_INTERNAL_2_4);          // 2.4 V ref
+  analogReadResolution(12);
+  uint32_t raw = analogRead(PIN_VBAT);
+  digitalWrite(VBAT_ENABLE, HIGH);           // disconnect divider (saves ~4 µA)
+  float v = raw * (2.4f / 4096.0f) * (1000.0f + 510.0f) / 510.0f;  // ≈ VBAT
+  // LiPo discharge curve, piecewise linear (good enough for a UI gauge).
+  float pct;
+  if      (v >= 4.10f) pct = 100.0f;
+  else if (v >= 3.90f) pct = 80.0f + (v - 3.90f) * 100.0f;   // 3.90-4.10 -> 80-100
+  else if (v >= 3.70f) pct = 40.0f + (v - 3.70f) * 200.0f;   // 3.70-3.90 -> 40-80
+  else if (v >= 3.50f) pct = 10.0f + (v - 3.50f) * 150.0f;   // 3.50-3.70 -> 10-40
+  else if (v >= 3.30f) pct = (v - 3.30f) * 50.0f;            // 3.30-3.50 -> 0-10
+  else                 pct = 0.0f;
+  return (uint8_t)(pct + 0.5f);
+}
 
 volatile bool recording = false;   // phone pressed Start (master switch)
 static bool napping = false;       // quiet too long -> radio+mic resting
@@ -173,6 +202,11 @@ void setup() {
   ctrlChr.setWriteCallback(onCtrlWrite);
   ctrlChr.begin();
 
+  pinMode(VBAT_ENABLE, OUTPUT);
+  digitalWrite(VBAT_ENABLE, HIGH);
+  batSvc.begin();
+  batSvc.write(readBatteryPct());
+
   PDM.onReceive(onPDMdata);
 
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
@@ -187,6 +221,13 @@ void setup() {
 // ── Loop ─────────────────────────────────────────────────────────────────────
 void loop() {
   uint32_t now = millis();
+
+  // Battery: refresh every 60 s (notifies subscribed phones automatically).
+  static uint32_t lastBat = 0;
+  if (now - lastBat >= 60000) {
+    lastBat = now;
+    batSvc.write(readBatteryPct());
+  }
 
   // Status LED (duty-cycled — solid LEDs burn ~1 mA each)
   static uint32_t lastBlink = 0;

@@ -88,7 +88,7 @@ function ProbBar({ label, p }: { label: string; p: number }) {
 }
 
 export default function DetectScreen() {
-  const { deviceFor, stateOf } = useBle();
+  const { deviceFor, stateOf, battery } = useBle();
   const device = deviceFor('audio');
   const connected = stateOf('audio') === 'connected';
   const { url } = useServerUrl();
@@ -275,9 +275,22 @@ export default function DetectScreen() {
   const ringScale = ring.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });
   const ringOpacity = ring.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.08] });
 
+  const batIcon =
+    battery == null ? null :
+    battery > 75 ? 'battery' : battery > 45 ? 'battery-60' : battery > 20 ? 'battery-30' : 'battery-10';
+
   return (
     <SafeAreaView style={s.root} edges={['top']}>
-      <Text style={s.title}>Detect</Text>
+      <View style={s.titleRow}>
+        <Text style={s.title}>Detect</Text>
+        {connected && battery != null && (
+          <View style={s.batPill}>
+            <MaterialCommunityIcons name={batIcon as any} size={15}
+              color={battery <= 20 ? A.red : battery <= 45 ? A.orange : A.green} />
+            <Text style={s.batText}>{battery}%</Text>
+          </View>
+        )}
+      </View>
 
       {!connected && <DevicePicker role="audio" title="Pick the pendant" />}
 
@@ -340,7 +353,10 @@ const CIRCLE = 210;
 
 const s = StyleSheet.create({
   root:   { flex: 1, backgroundColor: A.bg },
-  title:  { fontSize: 34, fontWeight: '700', color: A.label, letterSpacing: 0.3, paddingHorizontal: 20, paddingTop: 12 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12 },
+  title:  { fontSize: 34, fontWeight: '700', color: A.label, letterSpacing: 0.3 },
+  batPill:{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: A.card, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  batText:{ fontSize: 13, fontWeight: '600', color: A.label, fontVariant: ['tabular-nums'] },
   body:   { flex: 1, alignItems: 'center', paddingHorizontal: 20, paddingTop: 16 },
   heroWrap:  { width: CIRCLE + 40, height: CIRCLE + 40, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   heroRing:  { position: 'absolute', width: CIRCLE + 24, height: CIRCLE + 24, borderRadius: (CIRCLE + 24) / 2, borderWidth: 10 },

@@ -12,7 +12,7 @@ type Test = { state: 'idle' | 'testing' | 'ok' | 'fail'; msg: string };
 
 export default function SettingsScreen() {
   const { url, setUrl } = useServerUrl();
-  const { stateOf, disconnect } = useBle();
+  const { stateOf, disconnect, battery } = useBle();
   const router = useRouter();
   const [draft, setDraft] = useState(url);
   const [saved, setSaved] = useState(false);
@@ -110,6 +110,15 @@ export default function SettingsScreen() {
               {connected ? 'Connected' : 'Not connected'}
             </Text>
           </View>
+          {connected && battery != null && (
+            <>
+              <View style={s.sep} />
+              <View style={s.row}>
+                <Text style={s.rowLabel}>Battery</Text>
+                <Text style={[s.rowValue, { color: battery <= 20 ? A.red : A.secondary }]}>{battery}%</Text>
+              </View>
+            </>
+          )}
           {connected && (
             <>
               <View style={s.sep} />

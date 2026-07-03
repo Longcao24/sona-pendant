@@ -25,6 +25,10 @@ type ConnState = 'no-ble' | 'idle' | 'scanning' | 'connecting' | 'connected';
 
 export type Found = { id: string; name: string; rssi: number };
 
+// Standard Bluetooth Battery Service — firmware reports pendant charge here.
+const BATT_SVC = '0000180f-0000-1000-8000-00805f9b34fb';
+const BATT_CHR = '00002a19-0000-1000-8000-00805f9b34fb';
+
 type BleCtx = {
   noBle: boolean;
   devices: Found[];                                  // shared scan results
@@ -34,6 +38,7 @@ type BleCtx = {
   statusOf: (role: Role) => string;
   connectTo: (role: Role, id: string) => Promise<void>;
   disconnect: (role: Role) => Promise<void>;
+  battery: number | null;                            // pendant battery %, null = unknown
 };
 
 const Ctx = createContext<BleCtx | null>(null);
@@ -143,6 +148,24 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
   const stateOf   = useCallback((_r: Role) => stAudio, [stAudio]);
   const statusOf  = useCallback((_r: Role) => msgAudio, [msgAudio]);
 
+  // Pendant battery: read on connect, then poll every 60s (firmware refreshes
+  // its Battery Service at the same rate). Old firmware without the service
+  // just leaves this null — UI hides the gauge.
+  const [battery, setBattery] = useState<number | null>(null);
+  useEffect(() => {
+    if (!devAudio) { setBattery(null); return; }
+    let dead = false;
+    const read = async () => {
+      try {
+        const chr = await devAudio.readCharacteristicForService(BATT_SVC, BATT_CHR);
+        if (!dead && chr?.value) setBattery(atob(chr.value).charCodeAt(0));
+      } catch { /* service absent on old firmware */ }
+    };
+    read();
+    const id = setInterval(read, 60000);
+    return () => { dead = true; clearInterval(id); };
+  }, [devAudio]);
+
   // Auto-scan: keep looking for the necklace while disconnected so the
   // "Device found" sheet can pop up on its own (no manual Scan tap).
   useEffect(() => {
@@ -158,7 +181,7 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
   }, [noBle, stAudio, scan]);
 
   return (
-    <Ctx.Provider value={{ noBle, devices, scan, deviceFor, stateOf, statusOf, connectTo, disconnect }}>
+    <Ctx.Provider value={{ noBle, devices, scan, deviceFor, stateOf, statusOf, connectTo, disconnect, battery }}>
       {children}
     </Ctx.Provider>
   );
