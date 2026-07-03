@@ -1,10 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, View, Text, TextInput, Pressable, ActivityIndicator, Keyboard, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, Text, TextInput, Pressable, ActivityIndicator, Keyboard, ScrollView, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as IntentLauncher from 'expo-intent-launcher';
 
 import { useServerUrl, normalizeUrl } from '@/components/server-url-provider';
 import { useBle } from '@/components/ble-provider';
+import { usePrefs } from '@/components/prefs-provider';
 import { A } from '@/constants/apple';
 import { SERVER_URL as CLOUD_URL } from '@/constants/config';
 
@@ -13,6 +15,7 @@ type Test = { state: 'idle' | 'testing' | 'ok' | 'fail'; msg: string };
 export default function SettingsScreen() {
   const { url, setUrl } = useServerUrl();
   const { stateOf, disconnect, battery, bondedId, forget, deviceFor } = useBle();
+  const { autoStart, set } = usePrefs();
   const router = useRouter();
   const [draft, setDraft] = useState(url);
   const [saved, setSaved] = useState(false);
@@ -101,6 +104,36 @@ export default function SettingsScreen() {
         {test.state === 'testing' && <ActivityIndicator color={A.blue} style={{ marginTop: 8 }} />}
         {test.msg ? <Text style={[s.testMsg, { color: testTint }]}>{test.msg}</Text> : null}
 
+        {/* ── Detection ── */}
+        <Text style={s.section}>Detection</Text>
+        <View style={s.card}>
+          <View style={s.row}>
+            <Text style={s.rowLabel}>Auto-start on connect</Text>
+            <Switch
+              value={autoStart}
+              onValueChange={(v) => set({ autoStart: v })}
+              trackColor={{ true: A.green, false: A.separator }}
+              thumbColor="#fff"
+            />
+          </View>
+          <View style={s.sep} />
+          <Pressable
+            style={({ pressed }) => [s.row, pressed && s.pressed]}
+            onPress={() =>
+              IntentLauncher.startActivityAsync(
+                'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+                { data: 'package:com.longcao24.collect' },
+              ).catch(() => {})
+            }
+          >
+            <Text style={s.rowLabel}>Allow background use</Text>
+            <Text style={s.chevron}>›</Text>
+          </Pressable>
+        </View>
+        <Text style={s.footer}>
+          Auto-start begins detection the moment your pendant connects. Background use keeps it running with the screen off.
+        </Text>
+
         {/* ── Device ── */}
         <Text style={s.section}>Device</Text>
         <View style={s.card}>
@@ -172,6 +205,14 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
         <Text style={s.footer}>Capture the pendant mic stream to a WAV file for testing.</Text>
+
+        {/* ── About ── */}
+        <View style={[s.card, { marginTop: 24 }]}>
+          <Pressable style={({ pressed }) => [s.row, pressed && s.pressed]} onPress={() => router.push('/about' as any)}>
+            <Text style={s.rowLabel}>About Sona</Text>
+            <Text style={s.chevron}>›</Text>
+          </Pressable>
+        </View>
 
         <Text style={s.active}>Active server: {url}</Text>
       </ScrollView>

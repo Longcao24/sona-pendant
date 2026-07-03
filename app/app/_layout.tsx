@@ -7,6 +7,8 @@ import 'react-native-reanimated';
 import { BleProvider } from '@/components/ble-provider';
 import { ConnectGate } from '@/components/connect-gate';
 import { EventsProvider } from '@/components/events-provider';
+import { Onboarding } from '@/components/onboarding';
+import { PrefsProvider } from '@/components/prefs-provider';
 import { ServerUrlProvider } from '@/components/server-url-provider';
 import { A } from '@/constants/apple';
 
@@ -28,22 +30,27 @@ const LightTheme = {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
+      <PrefsProvider>
       <ServerUrlProvider>
       <BleProvider>
       <EventsProvider>
         <ThemeProvider value={LightTheme}>
-          <ConnectGate>
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="record" options={{ title: 'Record Raw Audio', headerBackTitle: 'Settings' }} />
-              <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-            </Stack>
-          </ConnectGate>
+          <Onboarding>
+            <ConnectGate>
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="record" options={{ title: 'Record Raw Audio', headerBackTitle: 'Settings' }} />
+                <Stack.Screen name="about" options={{ title: 'About Sona', headerBackTitle: 'Settings' }} />
+                <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+              </Stack>
+            </ConnectGate>
+          </Onboarding>
           <StatusBar style="dark" />
         </ThemeProvider>
       </EventsProvider>
       </BleProvider>
       </ServerUrlProvider>
+      </PrefsProvider>
     </SafeAreaProvider>
   );
 }

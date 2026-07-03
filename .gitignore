@@ -33,3 +33,8 @@ app/android/local.properties
 .idea/
 .vscode/
 .claude/
+
+# release signing — NEVER commit (public repo)
+app/android/keystore.properties
+app/android/app/sona-release.keystore
+*.keystore

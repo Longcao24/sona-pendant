@@ -8,6 +8,8 @@ import { DevicePicker } from '@/components/device-picker';
 import { useServerUrl } from '@/components/server-url-provider';
 import { useEvents } from '@/components/events-provider';
 import { askNotifPermission, startDetectionService, stopDetectionService, notifySessionSummary } from '@/components/detection-service';
+import { usePrefs } from '@/components/prefs-provider';
+import { useRouter } from 'expo-router';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { A, LABEL_ICON } from '@/constants/apple';
@@ -96,6 +98,10 @@ export default function DetectScreen() {
   const { report, flush, events } = useEvents();
   const eventsRef = useRef(events);
   useEffect(() => { eventsRef.current = events; }, [events]);
+  const { autoStart } = usePrefs();
+  const router = useRouter();
+  const failsRef = useRef(0);                 // consecutive classify failures
+  const [offline, setOffline] = useState(false);
 
   const [streaming, setStreaming] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -162,6 +168,8 @@ export default function DetectScreen() {
       const json: Result = await res.json();
       setResult(json);
       setStatus('');
+      failsRef.current = 0;
+      setOffline(false);
       // Feed the Events log: only confident, non-quiet detections count.
       const ok = !json.quiet && json.confident;
       reportRef.current(ok ? json.top.label : null, ok ? json.eating : false);
@@ -192,6 +200,8 @@ export default function DetectScreen() {
       }
     } catch (e: any) {
       setStatus(e.name === 'AbortError' ? 'Server timeout' : (e.message ?? 'Classify failed'));
+      failsRef.current += 1;
+      if (failsRef.current >= 3) setOffline(true);   // sustained -> show the banner
     } finally {
       clearTimeout(timeout);
       inFlightRef.current = false;
@@ -274,6 +284,18 @@ export default function DetectScreen() {
       subscRef.current = null;
     };
   }, [connected, device, teardown, start]);
+
+  // Auto-start (Settings toggle): begin detection once per connection, so the
+  // user just puts the pendant on. Pressing Stop doesn't re-trigger until the
+  // pendant reconnects.
+  const autoIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!connected || !device) { autoIdRef.current = null; return; }
+    if (autoStart && !subscRef.current && autoIdRef.current !== device.id) {
+      autoIdRef.current = device.id;
+      start();
+    }
+  }, [connected, device, autoStart, start]);
 
   // Render from the STABILIZED display, not the raw per-tick result.
   const heroLabel =
@@ -363,7 +385,16 @@ export default function DetectScreen() {
             </View>
           )}
 
-          {status ? <Text style={s.status}>{status}</Text> : null}
+          {offline && (
+            <View style={s.banner}>
+              <MaterialCommunityIcons name="cloud-off-outline" size={18} color={A.red} />
+              <Text style={s.bannerText}>Can't reach the detection server</Text>
+              <Pressable onPress={() => router.push('/settings' as any)} hitSlop={8}>
+                <Text style={s.bannerBtn}>Fix</Text>
+              </Pressable>
+            </View>
+          )}
+          {status && !offline ? <Text style={s.status}>{status}</Text> : null}
 
           {/* Start / Stop */}
           <Pressable
@@ -402,6 +433,10 @@ const s = StyleSheet.create({
   barFill:   { height: '100%', borderRadius: 4, backgroundColor: A.blue },
   probPct:   { width: 38, fontSize: 12, color: A.secondary, textAlign: 'right', fontVariant: ['tabular-nums'] },
   status:    { fontSize: 13, color: A.red, marginTop: 12, textAlign: 'center' },
+  banner:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FDECEA',
+               borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14, width: '100%' },
+  bannerText:{ flex: 1, fontSize: 13, color: A.red, fontWeight: '500' },
+  bannerBtn: { fontSize: 14, color: A.blue, fontWeight: '600' },
   btn:       { marginTop: 'auto', marginBottom: 16, backgroundColor: A.blue, paddingVertical: 16, borderRadius: 26,
                width: '100%', alignItems: 'center' },
   btnStop:   { backgroundColor: A.card },
