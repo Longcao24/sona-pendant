@@ -1,10 +1,9 @@
 /**
- * Nuna Necklace — XIAO nRF52840 Sense Plus — BLE Audio Streamer (food-intake)
+ * Sona Pendant — XIAO nRF52840 Sense Plus — BLE Audio Streamer (food-intake)
  *
  * Streams the onboard PDM mic over BLE as raw 16-bit PCM @ 16 kHz mono.
- * The phone app forwards these windows to the Nuna FastAPI server, which runs
- * the AST audio-classification model to detect food-intake events (chewing,
- * drinking, swallowing, …). IMU is intentionally NOT used — audio only.
+ * The phone app forwards these windows to the inference server (AST model)
+ * to detect food-intake events. IMU is intentionally NOT used — audio only.
  *
  * Build: Seeed nRF52 Boards core, board = "Seeed XIAO nRF52840 Sense Plus"
  *        (FQBN Seeeduino:nrf52:xiaonRF52840SensePlus)
@@ -19,6 +18,16 @@
  *   - configPrphBandwidth(BANDWIDTH_MAX): MTU 247 + big notify queue
  *   - 2M PHY requested on connect: doubles raw BLE rate
  *   - notify() is retried (data kept in ring buffer) so nothing drops
+ *
+ * Power management (battery: hours -> days):
+ *   - NAP MODE: while streaming, if audio stays quiet for SLEEP_AFTER_MS the
+ *     pendant naps — PDM off, no BLE notifies (radio idle). Every NAP_CHECK_MS
+ *     it listens for NAP_LISTEN_MS; sound above WAKE_MEANABS resumes streaming
+ *     instantly. The app keeps working: no packets while quiet, stream resumes
+ *     on the next bite/word.
+ *   - TX power 0 dBm (pendant is <2 m from the phone; +4 wastes radio power)
+ *   - conn LED handled manually + dim duty cycles; idle loop sleeps via delay()
+ *     (FreeRTOS tickless idle -> SoC sleep between events)
  */
 
 #include <bluefruit.h>
@@ -28,8 +37,15 @@
 #define MIC_GAIN      64           // PDM analog gain 0..80 (default 20). 64 = a bit louder than stock, still clean.
                                    // 70+ and/or digital gain clipped loud samples -> harsh "rè" buzz. Keep ≤~66.
 #define DIGITAL_GAIN  1.0f         // software gain AFTER PDM (hard-clipped to int16). 1.0 = OFF (no clipping).
-                                   // >1.0 distorts on anything loud — leave at 1.0 for clean audio.
 #define PKT_SAMPLES   122          // 244 bytes = max notify @ MTU 247
+
+// ── Power / nap tuning ───────────────────────────────────────────────────────
+#define SLEEP_AFTER_MS  30000      // this long below LOUD_MEANABS -> nap
+#define NAP_CHECK_MS     2000      // while napping, listen this often
+#define NAP_LISTEN_MS     180      // listen window per check (incl. ~60 ms mic settle)
+#define NAP_SETTLE_MS      60      // discard mic settling at each nap check
+#define WAKE_MEANABS      240      // mean |sample| (int16) that counts as sound
+#define LOUD_MEANABS      240      // same threshold used while streaming
 
 // Ring buffer between PDM ISR (producer) and BLE loop (consumer).
 #define RING_SIZE     8192         // power of 2; ~0.5 s cushion @ 16 kHz
@@ -42,7 +58,7 @@ static volatile int32_t warmup = 0;       // samples to drop after PDM.begin (mi
 
 // ── Status LED (XIAO RGB, active-LOW: clear pin = ON) ────────────────────────
 #define LED_RED   26   // P0.26 — streaming
-#define LED_BLUE   6   // P0.06 — BLE: blink=advertising, solid=connected
+#define LED_BLUE   6   // P0.06 — BLE: blink=advertising, solid(dim duty)=connected
 static inline void redOn()   { NRF_P0->OUTCLR = (1UL << LED_RED); }
 static inline void redOff()  { NRF_P0->OUTSET = (1UL << LED_RED); }
 static inline void blueOn()  { NRF_P0->OUTCLR = (1UL << LED_BLUE); }
@@ -52,7 +68,10 @@ BLEService        audioSvc("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic audioChr("19B10001-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic ctrlChr ("19B10002-E8F2-537E-4F6C-D104768A1214");
 
-volatile bool recording = false;
+volatile bool recording = false;   // phone pressed Start (master switch)
+static bool napping = false;       // quiet too long -> radio+mic resting
+static uint32_t lastLoudMs = 0;
+static uint32_t lastNapCheckMs = 0;
 
 // ── PDM data callback (called from PDM IRQ) ──────────────────────────────────
 void onPDMdata() {
@@ -79,17 +98,24 @@ void onPDMdata() {
   ringHead = h;
 }
 
+static void micStart(int32_t settleSamples) {
+  ringHead = ringTail = 0;
+  warmup = settleSamples;
+  PDM.setGain(MIC_GAIN);
+  PDM.begin(1, SAMPLE_RATE);       // 1 channel (mono)
+}
+
 // ── BLE control: start / stop streaming ──────────────────────────────────────
 void onCtrlWrite(uint16_t, BLECharacteristic*, uint8_t* data, uint16_t len) {
   if (len < 1) return;
   if (data[0] == 0x01 && !recording) {
-    ringHead = ringTail = 0;
-    warmup = SAMPLE_RATE / 7;      // drop ~140 ms of mic-settling samples (kills "bụp" pop)
     recording = true;
-    PDM.setGain(MIC_GAIN);
-    PDM.begin(1, SAMPLE_RATE);     // 1 channel (mono)
+    napping = false;
+    lastLoudMs = millis();
+    micStart(SAMPLE_RATE / 7);     // drop ~140 ms of mic-settling samples (kills "bụp" pop)
   } else if (data[0] == 0x00 && recording) {
     recording = false;
+    napping = false;
     PDM.end();
   }
 }
@@ -104,7 +130,21 @@ void onConnect(uint16_t handle) {
 }
 
 void onDisconnect(uint16_t, uint8_t) {
-  if (recording) { recording = false; PDM.end(); }
+  if (recording) { recording = false; napping = false; PDM.end(); }
+}
+
+// Mean |sample| of everything currently in the ring (and drain it).
+static uint32_t drainMeanAbs() {
+  uint32_t h = ringHead, t = ringTail;
+  uint32_t n = h - t;
+  if (n == 0) return 0;
+  uint64_t acc = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    int16_t v = ring[(t + i) & RING_MASK];
+    acc += (v < 0) ? -v : v;
+  }
+  ringTail = h;
+  return (uint32_t)(acc / n);
 }
 
 // ── Setup ────────────────────────────────────────────────────────────────────
@@ -114,8 +154,9 @@ void setup() {
 
   Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);   // before begin(): MTU 247 + big queue
   Bluefruit.begin();
+  Bluefruit.autoConnLed(false);   // we drive LEDs ourselves (saves ~1 mA)
   Bluefruit.setName("Nuna-Necklace");
-  Bluefruit.setTxPower(4);
+  Bluefruit.setTxPower(0);        // 0 dBm plenty for on-body -> phone-in-hand
   Bluefruit.Periph.setConnectCallback(onConnect);
   Bluefruit.Periph.setDisconnectCallback(onDisconnect);
 
@@ -139,39 +180,81 @@ void setup() {
   Bluefruit.Advertising.addService(audioSvc);
   Bluefruit.ScanResponse.addName();
   Bluefruit.Advertising.restartOnDisconnect(true);
-  Bluefruit.Advertising.setInterval(32, 244);
+  Bluefruit.Advertising.setInterval(32, 244);  // fast 20ms -> slow 152.5ms after 30s
   Bluefruit.Advertising.start(0);
 }
 
 // ── Loop ─────────────────────────────────────────────────────────────────────
 void loop() {
-  // Status LED
+  uint32_t now = millis();
+
+  // Status LED (duty-cycled — solid LEDs burn ~1 mA each)
   static uint32_t lastBlink = 0;
   static bool blinkState = false;
-  if (recording) {
-    blueOff(); redOn();
+  if (recording && !napping) {
+    blueOff();
+    // streaming: red at 10% duty (30 ms on / 270 ms off) instead of solid
+    redOn(); if ((now % 300) > 30) redOff();
+  } else if (napping) {
+    redOff(); blueOff();
+    if ((now % 5000) < 40) blueOn();   // alive blip every 5 s
   } else {
     redOff();
-    if (Bluefruit.connected()) blueOn();
-    else if (millis() - lastBlink > 300) {
-      lastBlink = millis();
+    if (Bluefruit.connected()) {
+      // connected idle: blue blip every 3 s
+      ((now % 3000) < 40) ? blueOn() : blueOff();
+    } else if (now - lastBlink > 300) {
+      lastBlink = now;
       blinkState = !blinkState;
       blinkState ? blueOn() : blueOff();
     }
   }
 
-  if (!recording) return;
+  if (!recording) { delay(20); return; }   // idle: FreeRTOS tickless -> SoC sleep
 
-  // Drain ring buffer in 122-sample packets. Retry on notify failure so no audio
-  // is lost when BLE is momentarily busy (data stays queued in the ring).
+  // ── NAP MODE: quiet too long -> mic+radio rest, periodic listen ───────────
+  if (napping) {
+    if (now - lastNapCheckMs >= NAP_CHECK_MS) {
+      lastNapCheckMs = now;
+      micStart((SAMPLE_RATE * NAP_SETTLE_MS) / 1000);
+      delay(NAP_LISTEN_MS);
+      uint32_t level = drainMeanAbs();
+      if (level >= WAKE_MEANABS) {
+        // Sound! resume streaming (keep mic running, just clear the ring so
+        // the stream starts clean).
+        napping = false;
+        lastLoudMs = now;
+        ringHead = ringTail = 0;
+      } else {
+        PDM.end();                 // back to rest
+      }
+    }
+    delay(10);
+    return;
+  }
+
+  // ── Streaming: drain ring in 122-sample packets, track loudness ───────────
   static int16_t pkt[PKT_SAMPLES];
   while ((uint32_t)(ringHead - ringTail) >= PKT_SAMPLES) {
     uint32_t t = ringTail;
-    for (uint16_t i = 0; i < PKT_SAMPLES; i++) pkt[i] = ring[(t + i) & RING_MASK];
+    uint32_t acc = 0;
+    for (uint16_t i = 0; i < PKT_SAMPLES; i++) {
+      int16_t v = ring[(t + i) & RING_MASK];
+      pkt[i] = v;
+      acc += (v < 0) ? -v : v;
+    }
     if (audioChr.notify((uint8_t*)pkt, PKT_SAMPLES * 2)) {
       ringTail = t + PKT_SAMPLES;
+      if (acc / PKT_SAMPLES >= LOUD_MEANABS) lastLoudMs = now;
     } else {
       break;                       // BLE queue full; send the rest next loop
     }
+  }
+
+  // Quiet for SLEEP_AFTER_MS -> nap (PDM off, no notifies, radio idles).
+  if (now - lastLoudMs > SLEEP_AFTER_MS) {
+    napping = true;
+    lastNapCheckMs = 0;            // check immediately on first nap loop
+    PDM.end();
   }
 }
