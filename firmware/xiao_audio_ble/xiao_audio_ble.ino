@@ -84,7 +84,14 @@ static uint8_t readBatteryPct() {
   delayMicroseconds(200);                    // divider settle
   analogReference(AR_INTERNAL_2_4);          // 2.4 V ref
   analogReadResolution(12);
-  uint32_t raw = analogRead(PIN_VBAT);
+  // nRF52 SAADC applies a new reference on the NEXT conversion, so the first
+  // read after analogReference() is stale -> discard it, then average to cut
+  // ADC noise. Without this the reported % was consistently off.
+  (void)analogRead(PIN_VBAT);
+  delayMicroseconds(20);
+  uint32_t acc = 0;
+  for (int i = 0; i < 16; i++) acc += analogRead(PIN_VBAT);
+  uint32_t raw = acc / 16;
   digitalWrite(VBAT_ENABLE, HIGH);           // disconnect divider (saves ~4 µA)
   float v = raw * (2.4f / 4096.0f) * (1000.0f + 510.0f) / 510.0f;  // ≈ VBAT
   // LiPo discharge curve, piecewise linear (good enough for a UI gauge).
@@ -158,7 +165,11 @@ void onConnect(uint16_t handle) {
   if (c) {
     c->requestPHY(BLE_GAP_PHY_2MBPS);       // double throughput if phone supports it
     c->requestMtuExchange(247);
-    c->requestConnectionParameter(6);       // 7.5 ms interval = max packets/sec
+    // 30 ms interval (was 7.5 ms). At 2M PHY + MTU 247 one connection event
+    // still carries the ~4 packets/event the 16 kHz stream needs, but the radio
+    // wakes ~4x less often -> big streaming-power saving. Ring buffer (0.5 s)
+    // absorbs the extra latency; detection is unaffected.
+    c->requestConnectionParameter(24);      // 24 * 1.25 ms = 30 ms
   }
 }
 
