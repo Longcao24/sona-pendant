@@ -105,6 +105,21 @@ static uint8_t readBatteryPct() {
   return (uint8_t)(pct + 0.5f);
 }
 
+// USB 5V present? The XIAO has no charge-status pin, but the nRF52840 detects
+// VBUS directly. VBUS present == plugged in == charging (or topped off).
+static inline bool usbPlugged() {
+  return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
+}
+
+// Publish battery over the standard Battery Service. The value is 0-100 (7
+// bits); bit 7 (0x80) is our charging flag — the app masks it off for the %
+// and uses it to show a charging indicator.
+static void publishBattery() {
+  uint8_t v = readBatteryPct() & 0x7F;
+  if (usbPlugged()) v |= 0x80;
+  batSvc.write(v);
+}
+
 volatile bool recording = false;   // phone pressed Start (master switch)
 static bool napping = false;       // quiet too long -> radio+mic resting
 static uint32_t lastLoudMs = 0;
@@ -220,7 +235,7 @@ void setup() {
   pinMode(VBAT_ENABLE, OUTPUT);
   digitalWrite(VBAT_ENABLE, HIGH);
   batSvc.begin();
-  batSvc.write(readBatteryPct());
+  publishBattery();
 
   PDM.onReceive(onPDMdata);
 
@@ -239,9 +254,12 @@ void loop() {
 
   // Battery: refresh every 60 s (notifies subscribed phones automatically).
   static uint32_t lastBat = 0;
-  if (now - lastBat >= 60000) {
+  static int8_t lastPlugged = -1;
+  bool plugged = usbPlugged();
+  if (now - lastBat >= 60000 || (int8_t)plugged != lastPlugged) {
     lastBat = now;
-    batSvc.write(readBatteryPct());
+    lastPlugged = plugged;
+    publishBattery();          // also fires instantly on plug/unplug
   }
 
   // Status LED (duty-cycled — solid LEDs burn ~1 mA each)

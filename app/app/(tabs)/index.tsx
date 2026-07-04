@@ -91,7 +91,7 @@ function ProbBar({ label, p }: { label: string; p: number }) {
 }
 
 export default function DetectScreen() {
-  const { deviceFor, stateOf, battery } = useBle();
+  const { deviceFor, stateOf, battery, charging } = useBle();
   const device = deviceFor('audio');
   const connected = stateOf('audio') === 'connected';
   const { url } = useServerUrl();
@@ -328,6 +328,7 @@ export default function DetectScreen() {
 
   const batIcon =
     battery == null ? null :
+    charging ? 'battery-charging' :
     battery > 75 ? 'battery' : battery > 45 ? 'battery-60' : battery > 20 ? 'battery-30' : 'battery-10';
 
   return (
@@ -337,7 +338,7 @@ export default function DetectScreen() {
         {connected && battery != null && (
           <View style={s.batPill}>
             <MaterialCommunityIcons name={batIcon as any} size={15}
-              color={battery <= 20 ? A.red : battery <= 45 ? A.orange : A.green} />
+              color={charging ? A.green : battery <= 20 ? A.red : battery <= 45 ? A.orange : A.green} />
             <Text style={s.batText}>{battery}%</Text>
           </View>
         )}

@@ -40,6 +40,7 @@ type BleCtx = {
   connectTo: (role: Role, id: string) => Promise<void>;
   disconnect: (role: Role) => Promise<void>;
   battery: number | null;                            // pendant battery %, null = unknown
+  charging: boolean;                                 // pendant plugged into USB (charging)
   bondedId: string | null;                           // remembered pendant (auto-connect target)
   forget: () => void;                                // unbind: stop auto-connecting to it
 };
@@ -230,18 +231,35 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
   // its Battery Service at the same rate). Old firmware without the service
   // just leaves this null — UI hides the gauge.
   const [battery, setBattery] = useState<number | null>(null);
+  const [charging, setCharging] = useState(false);
   useEffect(() => {
-    if (!devAudio) { setBattery(null); return; }
+    if (!devAudio) { setBattery(null); setCharging(false); return; }
     let dead = false;
     const read = async () => {
       try {
         const chr = await devAudio.readCharacteristicForService(BATT_SVC, BATT_CHR);
-        if (!dead && chr?.value) setBattery(atob(chr.value).charCodeAt(0));
+        if (!dead && chr?.value) {
+          const raw = atob(chr.value).charCodeAt(0);
+          setCharging(!!(raw & 0x80));   // bit7 = firmware "plugged/charging" flag
+          setBattery(raw & 0x7f);        // low 7 bits = 0..100 %
+        }
       } catch { /* service absent on old firmware */ }
+    };
+    const apply = (b64?: string | null) => {
+      if (dead || !b64) return;
+      const raw = atob(b64).charCodeAt(0);
+      setCharging(!!(raw & 0x80));
+      setBattery(raw & 0x7f);
     };
     read();
     const id = setInterval(read, 60000);
-    return () => { dead = true; clearInterval(id); };
+    // Also subscribe: firmware notifies on plug/unplug, so charging flips
+    // within a second instead of waiting for the next 60s poll.
+    let sub: any = null;
+    try {
+      sub = devAudio.monitorCharacteristicForService(BATT_SVC, BATT_CHR, (_e: any, c: any) => apply(c?.value));
+    } catch { /* notify unsupported on old firmware */ }
+    return () => { dead = true; clearInterval(id); try { sub?.remove(); } catch {} };
   }, [devAudio]);
 
   // Auto-connect to the remembered pendant: as soon as BLE powers on (and on a
@@ -274,7 +292,7 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
   }, [noBle, stAudio, scan]);
 
   return (
-    <Ctx.Provider value={{ noBle, devices, scan, deviceFor, stateOf, statusOf, connectTo, disconnect, battery, bondedId, forget }}>
+    <Ctx.Provider value={{ noBle, devices, scan, deviceFor, stateOf, statusOf, connectTo, disconnect, battery, charging, bondedId, forget }}>
       {children}
     </Ctx.Provider>
   );

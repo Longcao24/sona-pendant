@@ -14,7 +14,7 @@ type Test = { state: 'idle' | 'testing' | 'ok' | 'fail'; msg: string };
 
 export default function SettingsScreen() {
   const { url, setUrl } = useServerUrl();
-  const { stateOf, disconnect, battery, bondedId, forget, deviceFor } = useBle();
+  const { stateOf, disconnect, battery, charging, bondedId, forget, deviceFor } = useBle();
   const { autoStart, set } = usePrefs();
   const router = useRouter();
   const [draft, setDraft] = useState(url);
@@ -148,7 +148,9 @@ export default function SettingsScreen() {
               <View style={s.sep} />
               <View style={s.row}>
                 <Text style={s.rowLabel}>Battery</Text>
-                <Text style={[s.rowValue, { color: battery <= 20 ? A.red : A.secondary }]}>{battery}%</Text>
+                <Text style={[s.rowValue, { color: charging ? A.green : battery <= 20 ? A.red : A.secondary }]}>
+                  {charging ? `⚡ ${battery}% · Charging` : `${battery}%`}
+                </Text>
               </View>
             </>
           )}
