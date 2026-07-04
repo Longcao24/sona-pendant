@@ -46,7 +46,11 @@ export async function startDetectionService() {
       taskIcon: { name: 'ic_launcher', type: 'mipmap' },
       color: '#34C759',
       linkingURI: 'sona://',
-    });
+      // Android 14+ (targetSDK 34) requires a non-"none" FGS type that matches
+      // the manifest, or startForeground throws InvalidForegroundServiceTypeException
+      // and crashes the app. We stream from a BLE pendant -> connectedDevice.
+      foregroundServiceType: ['connectedDevice'],
+    } as any);
   } catch {} // service refusal (rare) just means screen-off detection may pause
 }
 
