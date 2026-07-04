@@ -11,10 +11,12 @@ const BRAND = 'Sona';   // product name shown in UI (BLE device still advertises
 // covers the app. It auto-scans (provider), shows the found device with a
 // Connect button, and lifts once connected — revealing the Detect main page.
 export function ConnectGate({ children }: { children: React.ReactNode }) {
-  const { devices, stateOf, statusOf, connectTo, scan, noBle } = useBle();
+  const { devices, stateOf, statusOf, connectTo, scan, noBle, bondedId } = useBle();
   const state = stateOf('audio');
   const connected = state === 'connected';
   const connecting = state === 'connecting';
+  // A remembered pendant reconnects on its own — show a spinner, not a button.
+  const autoConnecting = !!bondedId && !connected;
 
   const cand = devices[0] ?? null;
 
@@ -75,6 +77,19 @@ export function ConnectGate({ children }: { children: React.ReactNode }) {
 
             {noBle ? (
               <Text style={s.status}>{statusOf('audio')}</Text>
+            ) : autoConnecting ? (
+              <>
+                <View style={s.scanRow}>
+                  <ActivityIndicator color={A.blue} />
+                  <Text style={s.scanText}>Connecting to your pendant…</Text>
+                </View>
+                <Text style={s.hint}>Reconnecting automatically. Make sure the pendant is powered on.</Text>
+                {cand && (
+                  <Pressable style={({ pressed }) => [s.rescan, pressed && { opacity: 0.6 }]} onPress={() => connectTo('audio', cand.id)}>
+                    <Text style={s.rescanText}>Connect manually</Text>
+                  </Pressable>
+                )}
+              </>
             ) : cand ? (
               <>
                 <Text style={s.found}>Device found</Text>

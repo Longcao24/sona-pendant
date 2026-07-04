@@ -69,6 +69,11 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
   const setState = (_r: Role, v: ConnState) => setStAudio(v);
   const setMsg   = (_r: Role, v: string) => setMsgAudio(v);
 
+  // Live connection state for use inside long-lived callbacks (scan handler,
+  // auto-connect timer) without stale-closure bugs.
+  const stAudioRef = useRef<ConnState>('idle');
+  useEffect(() => { stAudioRef.current = stAudio; }, [stAudio]);
+
   const bleRef   = useRef<InstanceType<NonNullable<typeof BleManagerClass>> | null>(null);
   const foundRef = useRef<Map<string, any>>(new Map());   // id -> peripheral handle
 
@@ -137,45 +142,70 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
         .map((d: any) => ({ id: d.id, name: d.name ?? d.localName ?? DEVICE_NAME, rssi: d.rssi ?? -100 }))
         .sort((a, b) => b.rssi - a.rssi);
       setDevices(list);
-      // Auto-connect: it's the remembered pendant and we're not busy.
-      if (dev.id === bondedRef.current && !autoBusyRef.current) {
-        autoBusyRef.current = true;
-        connectToRef.current?.('audio', dev.id)
-          .finally(() => setTimeout(() => { autoBusyRef.current = false; }, 5000)); // backoff on failure
-      }
     });
 
     setTimeout(() => ble.stopDeviceScan(), 8000);
   }, []);
-  const autoBusyRef = useRef(false);
   const connectToRef = useRef<((role: Role, id: string) => Promise<void>) | null>(null);
 
+  // Shared post-connect setup: MTU, service discovery, disconnect handler,
+  // remember-for-auto-connect. Takes an already-connected Device handle.
+  const finishConnect = useCallback(async (role: Role, dRaw: any, id: string) => {
+    let d = dRaw;
+    try { d = await d.requestMTU(247); } catch {}
+    await d.discoverAllServicesAndCharacteristics();
+    d.onDisconnected(() => {
+      setDev(role, null);
+      setState(role, 'idle');
+      // "Reconnecting…" — the auto-connect timer picks a bonded pendant back up.
+      setMsg(role, bondedRef.current ? `${ROLE_LABEL[role]} disconnected. Reconnecting…`
+                                     : `${ROLE_LABEL[role]} disconnected. Tap Scan.`);
+    });
+    setDev(role, d);
+    setState(role, 'connected');
+    setMsg(role, `Connected · ${d.name ?? DEVICE_NAME}`);
+    saveBond(id);                 // remember: auto-connect to this pendant from now on
+  }, [saveBond]);
+
+  // Manual connect from the scan list (falls back to direct-by-id if the
+  // peripheral handle isn't cached).
   const connectTo = useCallback(async (role: Role, id: string) => {
     const ble = bleRef.current;
-    const dev = foundRef.current.get(id);
-    if (!ble || !dev) return;
+    if (!ble) return;
     ble.stopDeviceScan();
     setState(role, 'connecting');
     setMsg(role, 'Connecting…');
     try {
-      let d = await dev.connect();
-      try { d = await d.requestMTU(247); } catch {}
-      await d.discoverAllServicesAndCharacteristics();
-      d.onDisconnected(() => {
-        setDev(role, null);
-        setState(role, 'idle');
-        setMsg(role, `${ROLE_LABEL[role]} disconnected. Tap Scan.`);
-      });
-      setDev(role, d);
-      setState(role, 'connected');
-      setMsg(role, `Connected · ${d.name ?? dev.name ?? dev.localName ?? DEVICE_NAME}`);
-      saveBond(id);                 // remember: auto-connect to this pendant from now on
+      const dev = foundRef.current.get(id);
+      const dRaw = dev ? await dev.connect() : await ble.connectToDevice(id, { timeout: 12000 });
+      await finishConnect(role, dRaw, id);
     } catch (e: any) {
       setState(role, 'idle');
       setMsg(role, e.message ?? 'Connection failed');
     }
-  }, [saveBond]);
+  }, [finishConnect]);
   useEffect(() => { connectToRef.current = connectTo; }, [connectTo]);
+
+  // Auto-connect by id: connect straight to a known MAC without waiting to see
+  // it advertise (Android caches the address). Used by the auto-connect timer.
+  const connectById = useCallback(async (role: Role, id: string) => {
+    const ble = bleRef.current;
+    if (!ble) return;
+    if (stAudioRef.current === 'connected' || stAudioRef.current === 'connecting') return;
+    ble.stopDeviceScan();
+    setState(role, 'connecting');
+    setMsg(role, 'Connecting…');
+    try {
+      const d = await ble.connectToDevice(id, { timeout: 12000, autoConnect: false });
+      await finishConnect(role, d, id);
+    } catch {
+      // pendant out of range / not ready yet — timer retries.
+      setState(role, 'idle');
+      setMsg(role, 'Reconnecting…');
+    }
+  }, [finishConnect]);
+  const connectByIdRef = useRef(connectById);
+  useEffect(() => { connectByIdRef.current = connectById; }, [connectById]);
 
   const disconnect = useCallback(async (role: Role) => {
     const d = devAudio;
@@ -213,6 +243,21 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
     const id = setInterval(read, 60000);
     return () => { dead = true; clearInterval(id); };
   }, [devAudio]);
+
+  // Auto-connect to the remembered pendant: as soon as BLE powers on (and on a
+  // retry timer) connect straight to its address — no waiting to spot it in a
+  // scan. This is what makes reconnection hands-free after the first pairing.
+  useEffect(() => {
+    const ble = bleRef.current;
+    if (!ble || noBle || !bondedId) return;
+    let stopped = false;
+    const tryConnect = () => {
+      if (!stopped && stAudioRef.current === 'idle') connectByIdRef.current?.('audio', bondedId);
+    };
+    const sub = ble.onStateChange((st) => { if (st === 'PoweredOn') tryConnect(); }, true);
+    const iv = setInterval(tryConnect, 6000);   // retry until it comes into range
+    return () => { stopped = true; sub.remove(); clearInterval(iv); };
+  }, [noBle, bondedId]);
 
   // Auto-scan: keep looking for the necklace while disconnected so the
   // "Device found" sheet can pop up on its own (no manual Scan tap).
